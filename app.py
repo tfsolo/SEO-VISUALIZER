@@ -252,13 +252,57 @@ if uploaded_file and run_btn:
     tab1, tab2, tab3 = st.tabs(["Summary Data", "2D Map", "Download"])
     
     with tab1:
-        st.subheader("Cluster Business Value")
+        st.subheader("1. High-Level Topic Summary")
+        
+        # Create the summary table
         summary = df.groupby('Topic Label').agg({
             'Keyword': 'count',
             'Volume': 'sum',
             'Keyword Difficulty': 'mean'
         }).reset_index().sort_values('Volume', ascending=False)
-        st.dataframe(summary, use_container_width=True)
+        
+        # Display the main table
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.subheader("2. 🔎 Drill Down: Top 10 Keywords per Topic")
+        
+        # 1. Create a Dropdown to select the topic
+        topic_options = summary['Topic Label'].tolist()
+        selected_topic = st.selectbox("Select a Topic to analyze:", topic_options)
+
+        if selected_topic:
+            # 2. Filter data for that topic
+            topic_data = df[df['Topic Label'] == selected_topic]
+            
+            # 3. Sort by Volume to get Top 10
+            top_10 = topic_data.sort_values(by='Volume', ascending=False).head(10)
+            
+            # 4. robustly find CPC and Density columns (sometimes case sensitive)
+            # We look for columns that contain 'CPC' or 'Density'
+            cols_to_show = ['Keyword', 'Volume']
+            
+            # Find CPC column
+            cpc_col = next((c for c in df.columns if 'CPC' in c.upper()), None)
+            if cpc_col:
+                cols_to_show.append(cpc_col)
+                
+            # Find Competitive Density column
+            comp_col = next((c for c in df.columns if 'Density' in c or 'Competition' in c), None)
+            if comp_col:
+                cols_to_show.append(comp_col)
+                
+            # Find KD column
+            if 'Keyword Difficulty' in df.columns:
+                cols_to_show.append('Keyword Difficulty')
+
+            # 5. Display the Top 10 Table
+            st.write(f"**Top 10 High-Volume Queries for: {selected_topic}**")
+            st.dataframe(
+                top_10[cols_to_show], 
+                use_container_width=True, 
+                hide_index=True
+            )
         
     with tab2:
         st.subheader("Topic Landscape")
