@@ -42,12 +42,28 @@ with st.sidebar:
     min_topic_size = st.slider("Min Topic Size", 5, 100, 10)
     min_samples = st.slider("Min Samples (Density)", 1, 50, 5)
     
-    st.header("3. Weights (The Secret Sauce)")
-    st.info("Adjust how much influence each layer has on the clustering.")
-    w_text = st.slider("Text Weight", 0.0, 3.0, 0.9)   # Default matches your script
-    w_num = st.slider("Metrics Weight", 0.0, 3.0, 0.3) # Default matches your script
-    w_int = st.slider("Intent Weight", 0.0, 3.0, 0.2)  # Default matches your script
-    w_serp = st.slider("SERP Weight", 0.0, 3.0, 0.2)   # Default matches your script
+    st.header("3. Weights")
+    
+    # --- RESET BUTTON LOGIC ---
+    if st.button("Default"):
+        # Reset to percentage values (e.g., 90 = 0.9)
+        st.session_state['w_text'] = 80
+        st.session_state['w_num'] = 30
+        st.session_state['w_int'] = 20
+        st.session_state['w_serp'] = 20
+        st.rerun() 
+    
+    # Sliders now use integers (0-300)
+    w_text_pct = st.slider("Text Weight (%)", 0, 300, value=80, key="w_text")
+    w_num_pct = st.slider("Metrics Weight (%)", 0, 300, value=30, key="w_num")
+    w_int_pct = st.slider("Intent Weight (%)", 0, 300, value=20, key="w_int")
+    w_serp_pct = st.slider("SERP Weight (%)", 0, 300, value=20, key="w_serp")
+
+    # Convert back to decimals for the math
+    w_text = w_text_pct / 100.0
+    w_num = w_num_pct / 100.0
+    w_int = w_int_pct / 100.0
+    w_serp = w_serp_pct / 100.0
     
     run_btn = st.button("RUN CLUSTERING", type="primary")
 
