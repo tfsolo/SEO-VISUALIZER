@@ -65,7 +65,7 @@ with st.sidebar:
     w_int = w_int_pct / 100.0
     w_serp = w_serp_pct / 100.0
     
-    run_btn = st.button("RUN CLUSTERING", type="primary")
+    run_btn = st.button("RUN ANALYSIS", type="primary")
 
 # --- CACHED FUNCTIONS ---
 
@@ -153,6 +153,36 @@ def clean_text(text):
     text = re.sub(r'\b(2020|2021|2022|2023|2024|2025)\b', '', text)
     return text.strip()
 
+# --- POP-UP FUNCTION ---
+@st.dialog("Topic Deep Dive")
+def show_topic_details(topic_name, df):
+    st.write(f"### 🔍 {topic_name}")
+    
+    # Filter data for this topic
+    topic_data = df[df['Topic Label'] == topic_name]
+    
+    # Sort by Volume to get Top 10
+    top_10 = topic_data.sort_values(by='Volume', ascending=False).head(10)
+    
+    # Dynamic Column Finder (Finds CPC/Density even if names vary)
+    cols_to_show = ['Keyword', 'Volume']
+    
+    # Check for CPC
+    cpc_col = next((c for c in df.columns if 'CPC' in c.upper()), None)
+    if cpc_col: cols_to_show.append(cpc_col)
+        
+    # Check for Density
+    comp_col = next((c for c in df.columns if 'Density' in c or 'Competition' in c), None)
+    if comp_col: cols_to_show.append(comp_col)
+    
+    # Display the table
+    st.dataframe(
+        top_10[cols_to_show], 
+        use_container_width=True, 
+        hide_index=True
+    )
+
+
 # --- MAIN APP ---
 
 uploaded_file = st.file_uploader("Upload SEMrush/Ahrefs CSV", type=['csv'])
@@ -205,7 +235,7 @@ if uploaded_file and run_btn:
         df['Topic'] = topics
 
     # 4. Labeling (Optimized Single Pass)
-    with st.spinner("Gemini is analyzing business value..."):
+    with st.spinner("AI analyzing business value..."):
         genai.configure(api_key=api_key)
         gemini = genai.GenerativeModel('gemini-1.5-flash')
         
@@ -252,57 +282,42 @@ if uploaded_file and run_btn:
     tab1, tab2, tab3 = st.tabs(["Summary Data", "2D Map", "Download"])
     
     with tab1:
-        st.subheader("1. High-Level Topic Summary")
-        
-        # Create the summary table
+        st.subheader("Cluster Business Value")
+        st.info("👆 Click on any row below to see top keywords.")
+
+        # 1. Create the summary table
         summary = df.groupby('Topic Label').agg({
             'Keyword': 'count',
             'Volume': 'sum',
             'Keyword Difficulty': 'mean'
         }).reset_index().sort_values('Volume', ascending=False)
         
-        # Display the main table
-        st.dataframe(summary, use_container_width=True, hide_index=True)
-
-        st.markdown("---")
-        st.subheader("2. 🔎 Drill Down: Top 10 Keywords per Topic")
+        # 2. Rename columns
+        summary.columns = ['Topic Label', 'Count', 'Total Volume', 'Avg KD']
         
-        # 1. Create a Dropdown to select the topic
-        topic_options = summary['Topic Label'].tolist()
-        selected_topic = st.selectbox("Select a Topic to analyze:", topic_options)
+        # 3. HIDE OUTLIERS (The Fix)
+        # We filter out rows where Topic Label contains "Outlier" or "Noise"
+        summary_clean = summary[~summary['Topic Label'].str.contains("Outlier|Noise", case=False, na=False)]
+        
+        # 4. Display Interactive Table
+        # on_select="rerun" makes the app reload instantly when clicked
+        selection = st.dataframe(
+            summary_clean, 
+            use_container_width=True, 
+            hide_index=True,
+            on_select="rerun",  # <--- This enables the click action
+            selection_mode="single-row"
+        )
 
-        if selected_topic:
-            # 2. Filter data for that topic
-            topic_data = df[df['Topic Label'] == selected_topic]
+        # 5. Handle the Click
+        if len(selection.selection.rows) > 0:
+            # Get the index of the clicked row
+            selected_index = selection.selection.rows[0]
+            # Get the Topic Name from that row
+            selected_topic = summary_clean.iloc[selected_index]['Topic Label']
             
-            # 3. Sort by Volume to get Top 10
-            top_10 = topic_data.sort_values(by='Volume', ascending=False).head(10)
-            
-            # 4. robustly find CPC and Density columns (sometimes case sensitive)
-            # We look for columns that contain 'CPC' or 'Density'
-            cols_to_show = ['Keyword', 'Volume']
-            
-            # Find CPC column
-            cpc_col = next((c for c in df.columns if 'CPC' in c.upper()), None)
-            if cpc_col:
-                cols_to_show.append(cpc_col)
-                
-            # Find Competitive Density column
-            comp_col = next((c for c in df.columns if 'Density' in c or 'Competition' in c), None)
-            if comp_col:
-                cols_to_show.append(comp_col)
-                
-            # Find KD column
-            if 'Keyword Difficulty' in df.columns:
-                cols_to_show.append('Keyword Difficulty')
-
-            # 5. Display the Top 10 Table
-            st.write(f"**Top 10 High-Volume Queries for: {selected_topic}**")
-            st.dataframe(
-                top_10[cols_to_show], 
-                use_container_width=True, 
-                hide_index=True
-            )
+            # Launch the Pop-up
+            show_topic_details(selected_topic, df)
         
     with tab2:
         st.subheader("Topic Landscape")
