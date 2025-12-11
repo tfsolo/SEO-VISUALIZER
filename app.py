@@ -11,6 +11,9 @@ from hdbscan import HDBSCAN
 import google.generativeai as genai
 import plotly.express as px
 from umap import UMAP
+from scipy.stats import gaussian_kde
+import plotly.graph_objects as go
+
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Advanced SEO Clusterer", layout="wide")
@@ -131,6 +134,52 @@ def show_topic_details(topic_name, df):
     
     st.dataframe(top_10[cols_to_show], use_container_width=True, hide_index=True)
 
+def calculate_blue_ocean(df, x_col='x', y_col='y', volume_col='Volume'):
+    # 1. Get coordinates
+    x = df[x_col]
+    y = df[y_col]
+    
+    # 2. Calculate "Supply Density" (Where existing content is)
+    # We use a standard Gaussian KDE
+    xy = np.vstack([x, y])
+    kde_supply = gaussian_kde(xy)
+    
+    # 3. Calculate "Demand Density" (Where search volume is)
+    # We weigh the points by their Search Volume
+    # (Note: Standard KDE doesn't support weights easily in scipy, 
+    # so we use a resampling trick: we repeat high-volume points more often)
+    
+    # Create a weighted sample for Demand
+    # Normalize volume to reasonable integers for resampling
+    weights = (df[volume_col] / df[volume_col].mean()).fillna(0).clip(lower=0.1)
+    indices = np.random.choice(np.arange(len(df)), size=5000, p=weights/weights.sum())
+    x_demand = x.iloc[indices]
+    y_demand = y.iloc[indices]
+    
+    kde_demand = gaussian_kde(np.vstack([x_demand, y_demand]))
+    
+    # 4. Create a Grid to evaluate the map
+    # We make a meshgrid to calculate density at every coordinate
+    xmin, xmax = x.min(), x.max()
+    ymin, ymax = y.min(), y.max()
+    X, Y = np.mgrid[xmin:xmax:100j, ymin:ymax:100j]
+    positions = np.vstack([X.ravel(), Y.ravel()])
+    
+    # 5. Evaluate Densities
+    Z_supply = np.reshape(kde_supply(positions).T, X.shape)
+    Z_demand = np.reshape(kde_demand(positions).T, X.shape)
+    
+    # 6. Calculate the "Blue Ocean Score" (Gap Analysis)
+    # Normalize both to 0-1 scale so they are comparable
+    Z_supply_norm = (Z_supply - Z_supply.min()) / (Z_supply.max() - Z_supply.min())
+    Z_demand_norm = (Z_demand - Z_demand.min()) / (Z_demand.max() - Z_demand.min())
+    
+    # The Gap: High Demand (1.0) minus High Supply (1.0) = 0
+    # High Demand (1.0) minus Low Supply (0.1) = 0.9 (Blue Ocean!)
+    Z_opportunity = Z_demand_norm - (Z_supply_norm * 1.2) # We penalize supply slightly more
+    
+    return X, Y, Z_opportunity
+
 # --- MAIN LOGIC ---
 
 uploaded_file = st.file_uploader("Upload SEMrush/Ahrefs CSV", type=['csv'])
@@ -139,7 +188,7 @@ if uploaded_file:
     # 1. RUN ANALYSIS (Only happens when button clicked)
     if run_btn:
         if not api_key:
-            st.error("🔑 API Key Required to proceed.")
+            st.error("API Key Required to proceed.")
             st.stop()
             
         st.info("Reading Data...")
@@ -211,7 +260,7 @@ if uploaded_file:
         
         with tab1:
             st.subheader("Cluster Business Value")
-            st.info("👆 Click on any row below to see top keywords.")
+            st.info("Click on any row below to see top keywords.")
 
             summary = df.groupby('Topic Label').agg({
                 'Keyword': 'count',
@@ -238,12 +287,52 @@ if uploaded_file:
             
         with tab2:
             st.subheader("Topic Landscape")
+        
+            # 1. Calculate UMAP (Standard)
             umap_2d = UMAP(n_neighbors=15, n_components=2, min_dist=0.0, metric='cosine').fit_transform(embeddings)
             plot_df = pd.DataFrame(umap_2d, columns=['x', 'y'])
             plot_df['Topic'] = df['Topic Label']
             plot_df['Keyword'] = df['Keyword']
             plot_df['Volume'] = df['Volume']
-            fig = px.scatter(plot_df, x='x', y='y', color='Topic', hover_data=['Keyword', 'Volume'], title="Semantic & Business Metric Projection")
+        
+            # 2. Toggle for Advanced Mode
+            show_blue_ocean = st.toggle("Show Blue Ocean Opportunities 🌊", value=False)
+        
+            if show_blue_ocean:
+                st.info("🌊 **Blue Regions** = High Search Volume but Low Content Saturation (Opportunity). **Red Regions** = Highly Saturated.")
+            
+                # Calculate the surfaces
+                X_grid, Y_grid, Z_opp = calculate_blue_ocean(plot_df, 'x', 'y', 'Volume')
+            
+                # Base Scatter Plot
+                fig = px.scatter(
+                    plot_df, x='x', y='y', color='Topic',
+                    hover_data=['Keyword', 'Volume'],
+                    title="Blue Ocean Analysis: Demand vs. Supply Topology"
+                )
+            
+                # Overlay Contours
+                fig.add_trace(go.Contour(
+                    x=X_grid[:,0],
+                    y=Y_grid[0,:],
+                    z=Z_opp,
+                    colorscale="RdBu", # Red = Bad, Blue = Good
+                    opacity=0.4,       # Semi-transparent
+                    showscale=False,   # Hide color bar to keep it clean
+                    contours=dict(start=0.05, end=1.0, size=0.1) # Only show positive opportunities
+                ))
+            
+                # Update Layout
+                fig.update_layout(plot_bgcolor="white")
+            
+            else:
+                # Standard Plot
+                fig = px.scatter(
+                    plot_df, x='x', y='y', color='Topic',
+                    hover_data=['Keyword', 'Volume'],
+                    title="Semantic & Business Metric Projection"
+                )
+            
             st.plotly_chart(fig, use_container_width=True)
             
         with tab3:
