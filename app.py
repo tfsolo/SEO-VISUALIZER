@@ -145,7 +145,8 @@ def process_multi_modal_embeddings(df, _model, w_text, w_num, w_int, w_serp):
         serp_vectors * w_serp
     ))
     
-    return combined_embeddings, docs
+    # Force conversion to standard float numbers to prevent TypeErrors
+    return combined_embeddings.astype(np.float64), docs
 
 def clean_text(text):
     text = str(text)
